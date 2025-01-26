@@ -1,0 +1,4 @@
+functions-framework==3.*
+plaid-python==18.*
+google-cloud-secret-manager==2.*
+google-api-python-client==2.*
