@@ -6,13 +6,19 @@ import hmac
 import hashlib
 from plaid_sync import PlaidTransactionSync
 from sheets_sync import SheetsSyncer
+import os
 
-def get_secret(secret_id):
+def get_secret(secret_name):
     """Retrieve secret from Secret Manager"""
     client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/YOUR_PROJECT_ID/secrets/{secret_id}/versions/latest"
-    response = client.access_secret_version(request={"name": name})
+    response = client.access_secret_version(request={"name": f"{secret_name}/versions/latest"})
     return response.payload.data.decode("UTF-8")
+
+# Get secrets
+PLAID_CLIENT_ID = get_secret(os.getenv('PLAID_CLIENT_ID_SECRET'))
+PLAID_SECRET = get_secret(os.getenv('PLAID_SECRET_SECRET'))
+SPREADSHEET_ID = get_secret(os.getenv('SPREADSHEET_ID_SECRET'))
+PLAID_TOKENS = json.loads(get_secret(os.getenv('PLAID_TOKENS_SECRET')))
 
 @functions_framework.http
 def webhook_handler(request):
@@ -29,20 +35,25 @@ def webhook_handler(request):
     webhook_data = request.get_json()
     webhook_type = webhook_data.get('webhook_type')
     webhook_code = webhook_data.get('webhook_code')
+    item_id = webhook_data.get('item_id')
 
     # Log webhook for debugging
     print(f"Received webhook: {webhook_type} - {webhook_code}")
 
     if webhook_type == 'TRANSACTIONS' and webhook_code == 'SYNC_UPDATES_AVAILABLE':
         try:
-            # Get the item_id from the webhook
-            item_id = webhook_data.get('item_id')
+            # Find access token for this item_id
+            access_token = None
+            for token, items in PLAID_TOKENS.items():
+                if item_id in items:
+                    access_token = token
+                    break
+            
+            if not access_token:
+                raise ValueError(f"No access token found for item_id: {item_id}")
             
             # Initialize syncers
             syncer = SheetsSyncer()
-            
-            # Get access token for this item_id from Secret Manager
-            access_token = get_secret(f"plaid-access-token-{item_id}")
             
             # Sync transactions
             transactions = syncer.plaid_syncer.sync_transactions(access_token)
